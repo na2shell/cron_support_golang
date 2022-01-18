@@ -8,78 +8,80 @@ import (
 	"os/exec"
 	"context"
 	"time"
+	"path/filepath"
 )
 
 func main(){
 	timeout := flag.Int("t", 10, "timeout time")
-	status := flag.String("o", "./", "job status log file path")
-	logfile := flag.String("log", "./", "job itself log file path")
+	status_log_path := flag.String("o", "./log/status.txt", "job status log file path")
+	logfile := flag.String("log", "./log/log.txt", "job itself log file path")
 	command := flag.String("cmd", "ls -la", "exec command")
 	name := flag.String("name","hoge-job","in status file job name")
 	flag.Parse()
-    // fmt.Println(*timeout)
-    fmt.Println(*status)
-    fmt.Println(*logfile)
-    // fmt.Println(*command)
 
 	cmstr := *command
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout*100) * time.Millisecond)
 
-	var res bool
-
     defer cancel()
-    if output, err := exec.CommandContext(ctx, "sh", "-c", cmstr).CombinedOutput(); err != nil {
-        fmt.Printf("Exceed the timeout 100ms. %v\n", err)
-        fmt.Printf("Combine Output: %s\n", output)
-		fmt.Println("err happaen")
-		res = false
-    }else{
-		fmt.Println("suc")
-		res = true
-	}
-	err := write_status("./logfile",res,*name,make_log_message)
+    _, err := exec.CommandContext(ctx, "sh", "-c", cmstr).CombinedOutput()
+	res := check_nil(err)
+	message,err := make_log_message(*name,res,get_date)
 
-	if err != nil {
-		fmt.Println("can't write to status file -> logfile")
+	if err != nil{
+		write_log(*logfile,"somthing fail in make_log_message")
+	}
+
+	if err := write_log(*status_log_path,message); err != nil{
+		write_log(*logfile,"somthing fail in writing info to status log file")
 	}
 }
 
-func write_status(
-	path string,
-	status bool,
-	job_name string,
-	f func(string,bool) (string, error)) error{
+func check_nil(err error) bool {
+	if err != nil{
+		return true
+	}else{
+		return false
+	}
+}
 
-	file, err := os.Create(path)
+
+func write_log(path string, message string) error{
+	dirname := filepath.Dir(path)
+
+	if err := os.MkdirAll(dirname, 0744); err != nil {
+        fmt.Println(err)
+    }
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
     if err != nil {
+		fmt.Println(err)
         return err
     }
     defer file.Close()
 
-	line,err := f(job_name,status)
-
-	if err != nil {
-		return err
-	}
-
-	if _, err := file.WriteString(line); err != nil {
+	if _, err := file.WriteString(message); err != nil {
 		return err
 	}
 
 	return err
 }
 
-func make_log_message(job_name string,status bool) (message string, err error) {
 
-	var line string
-	// time := time.Now()
+func make_log_message(job_name string,status bool,f func() string) (message string, err error) {
+	
+	var format string
 
 	if status {
-		line = "[suc] time "+job_name + " is successful"
+		format = "[SUCCESS] %s %s is successful\n"
 	}else{
-		line = "[fail] time "+job_name + " is failed"
+		format = "[FAIL] %s %s is fail\n"
 	}
 
-	return line,err
+	time := f()
+	res := fmt.Sprintf(format, time, job_name)
+	return res,err
+}
 
+func get_date()(date_str string){
+	time_str := time.Now().Format("2006-01-02T15:04:05.000000000Z")
+	return time_str
 }
